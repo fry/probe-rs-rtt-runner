@@ -1,0 +1,14 @@
+[package]
+name = "rtt-logger"
+version = "0.1.0"
+authors = ["Eike Siewertsen <eike@allv.is>"]
+edition = "2018"
+
+
+[dependencies]
+log = { version = "0.4.8", default-features = false }
+bare-metal = "0.2.5"
+cortex-m = "0.6.2"
+
+[features]
+panic = []

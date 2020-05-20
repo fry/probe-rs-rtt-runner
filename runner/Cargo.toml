@@ -1,0 +1,14 @@
+[package]
+name = "probe-rs-rtt-runner"
+version = "0.1.0"
+authors = ["Eike Siewertsen <eike@allv.is>"]
+edition = "2018"
+
+[dependencies]
+# probe-rs = { git = "https://github.com/probe-rs/probe-rs" }
+probe-rs = "0.6.2"
+probe-rs-rtt = { git = "https://github.com/probe-rs/probe-rs-rtt" }
+env_logger = "0.7.1"
+anyhow = "1.0.28"
+log = "0.4.8"
+structopt = "0.3.14"

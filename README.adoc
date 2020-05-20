@@ -1,0 +1,24 @@
+== Introduction
+
+A cargo runner for cortex-m embedded projects using probe-rs to find and flash the device with the passed in executable and watch for RTT log events.
+
+This project consists of two crates:
+
+=== probe-rs-rtt-runner
+
+The cargo runner to be used. To enable it for your project, `cargo install` this project (or build and remember the path to your `target` directory) add a `.cargo/config` file with (at least) the following content:
+[source,toml]
+----
+[target.thumbv7em-none-eabihf]
+runner = '<path to your>\probe-rs-rtt-runner[.exe] --verbose'
+----
+
+=== logger-rtt
+
+A Rust logger using `https://github.com/wez/jlink_rtt`  to be used by the embedded project. Initialize at start with `rtt_logger::init(log::Level::Trace);` or any preferred min logging level. Log using the `log` crate.
+
+== TODO
+
+* Add API to communicate microcontroller's clock & frequency at startup to display accurate timestamp of log events
+* `env_logger`-style filtering & colorized logging
+* Clean exit on CTRL-C (On Windows, the COM port sometimes remains open)
