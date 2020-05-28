@@ -1,22 +1,26 @@
 use anyhow::Result;
 use probe_rs::{
-    config::TargetSelector,
+    config::{MemoryRange, MemoryRegion, TargetSelector},
     flashing::{download_file_with_options, DownloadOptions, Format},
-    Probe, WireProtocol,
+    Probe, Session, WireProtocol,
 };
 use probe_rs_rtt::{Rtt, ScanRegion};
 use std::io::prelude::*;
 use std::io::stdout;
-use std::path::PathBuf;
-use std::{rc::Rc, time::Duration};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use structopt::StructOpt;
 
-#[derive(StructOpt)]
+#[derive(StructOpt, Clone)]
 struct Opts {
+    #[structopt(short, long)]
+    chip: Option<String>,
     #[structopt(long, short)]
     logging: Option<log::LevelFilter>,
     #[structopt(long, short)]
     verbose: bool,
+    #[structopt(long, short)]
+    no_halt_on_exit: bool,
     target: PathBuf,
 }
 
@@ -29,14 +33,16 @@ fn main() -> Result<()> {
             .init();
     }
 
-    let path: PathBuf = opts.target;
     let list = Probe::list_all();
     let device = list.first().unwrap();
 
-    // TODO: don't.. hardcode
-    let chip: TargetSelector = "STM32F401ceux".into();
-    let mut probe = Probe::from_probe_info(&device)?;
+    let mut probe = device.open()?;
     probe.select_protocol(WireProtocol::Swd)?;
+
+    let target_selector = match &opts.chip {
+        Some(identifier) => identifier.into(),
+        None => TargetSelector::Auto,
+    };
 
     let speed = 1000;
     let _protocol_speed = {
@@ -57,46 +63,101 @@ fn main() -> Result<()> {
         println!("probe speed: {}", probe.speed_khz());
     }
 
-    let session = probe.attach(chip)?;
-    let core = Rc::new(session.attach_to_core(0)?);
+    let session = probe.attach(target_selector)?;
+    let session = Arc::new(Mutex::new(session));
 
+    {
+        let opts = opts.clone();
+        let session = session.clone();
+        ctrlc::set_handler(move || {
+            if !opts.no_halt_on_exit {
+                println!("halting chip");
+                session.lock().unwrap().core(0).unwrap().halt().unwrap();
+            }
+            std::process::exit(0);
+        })
+        .expect("Error setting Ctrl-C handler");
+    }
+
+    match run(session, &opts) {
+        Err(e) => {
+            return Err(e);
+        }
+        Ok(_) => Ok(()),
+    }
+}
+
+fn get_ram_memory_ranges(session: &Session, file: &Path) -> Result<Vec<ScanRegion>> {
+    let buffer = std::fs::read(&file)?;
+    let binary = goblin::elf::Elf::parse(&buffer.as_slice())?;
+
+    // Find all RAM memory ranges from target chip by probe-rs
+    let memory_map: Vec<_> = session
+        .memory_map()
+        .iter()
+        .filter_map(|r| match r {
+            MemoryRegion::Ram(r) => Some(r.range.clone()),
+            _ => None,
+        })
+        .collect();
+
+    // Find all memory ranges from the binary in RAM
+    Ok(binary
+        .section_headers
+        .iter()
+        .filter(|sh| sh.sh_size > 0)
+        .filter_map(|sh| {
+            let range = sh.sh_addr as u32..sh.sh_addr as u32 + sh.sh_size as u32;
+            if memory_map.iter().any(|r| r.contains_range(&range)) {
+                Some(ScanRegion::Range(range))
+            } else {
+                None
+            }
+        })
+        .collect())
+}
+
+fn run(session: Arc<Mutex<Session>>, opts: &Opts) -> Result<()> {
     if opts.verbose {
         println!("flashing");
     }
 
-    download_file_with_options(
-        &session,
-        path.as_path(),
-        Format::Elf,
-        DownloadOptions {
-            progress: None,
-            keep_unwritten_bytes: false,
-        },
-    )
-    .unwrap();
+    let ram_ranges;
+    {
+        let mut guard = session.lock().unwrap();
+        download_file_with_options(
+            &mut guard,
+            opts.target.as_path(),
+            Format::Elf,
+            DownloadOptions {
+                progress: None,
+                keep_unwritten_bytes: false,
+            },
+        )
+        .unwrap();
 
-    if opts.verbose {
-        println!("resetting");
+        if opts.verbose {
+            println!("resetting");
+        }
+        guard.core(0)?.reset()?;
+        ram_ranges = get_ram_memory_ranges(&guard, &opts.target)?;
     }
-    core.reset()?;
 
-    std::thread::sleep(Duration::from_secs(1));
-
-    let scan_region = ScanRegion::Range(0x20000000..0x20008000);
     let mut rtt;
-    loop {
+    'rtt: loop {
         if opts.verbose {
             println!("attaching RTT");
         }
 
-        match Rtt::attach_region(core.clone(), &session, &scan_region) {
-            Ok(r) => {
-                rtt = r;
-                break;
-            }
-            Err(err) => {
-                eprintln!("Error attaching to RTT: {}", err);
-                continue;
+        for region in &ram_ranges {
+            match Rtt::attach_region(session.clone(), &region) {
+                Ok(r) => {
+                    rtt = r;
+                    break 'rtt;
+                }
+                Err(err) => {
+                    eprintln!("Error attaching to RTT: {}", err);
+                }
             }
         }
     }

@@ -6,12 +6,14 @@ This project consists of two crates:
 
 === probe-rs-rtt-runner
 
-The cargo runner to be used. To enable it for your project, `cargo install` this project (or build and remember the path to your `target` directory) add a `.cargo/config` file with (at least) the following content:
+The cargo runner to be used. To enable it for your project, `cargo install` this project (or build and remember the path to your `target` directory) add a `.cargo/config` file with, for example, (at least) the following content:
 [source,toml]
 ----
 [target.thumbv7em-none-eabihf]
-runner = '<path to your>\probe-rs-rtt-runner[.exe] --verbose'
+runner = '<path to your>\probe-rs-rtt-runner[.exe] --verbose --chip STM32F401'
 ----
+
+If `chip` is not provided, probe-rs will try to determine it automatically. Supported chip families can be found in `https://github.com/probe-rs/probe-rs/tree/master/probe-rs/targets`.
 
 === logger-rtt
 
