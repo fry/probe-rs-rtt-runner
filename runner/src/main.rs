@@ -1,4 +1,6 @@
 use anyhow::{bail, Result};
+use console::style;
+use indicatif::{ProgressBar, ProgressStyle};
 use probe_rs::{
     config::{MemoryRange, MemoryRegion, TargetSelector},
     flashing::{download_file_with_options, DownloadOptions, Format},
@@ -139,7 +141,7 @@ fn get_ram_memory_ranges(session: &Session, file: &Path) -> Result<Vec<ScanRegio
 
 fn run(session: Arc<Mutex<Session>>, opts: &Opts) -> Result<()> {
     if opts.verbose {
-        println!("flashing");
+        println!("{} Flashing", style("[1/3]").bold().dim());
     }
 
     let ram_ranges;
@@ -157,15 +159,20 @@ fn run(session: Arc<Mutex<Session>>, opts: &Opts) -> Result<()> {
         .unwrap();
 
         if opts.verbose {
-            println!("resetting");
+            println!("{} Resetting", style("[2/3]").bold().dim());
         }
         guard.core(0)?.reset()?;
         ram_ranges = get_ram_memory_ranges(&guard, &opts.target)?;
     }
 
-    if opts.verbose {
-        println!("attaching RTT");
-    }
+    let spinner_style = ProgressStyle::default_spinner()
+        // .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+        .template("{prefix:.bold.dim} {msg} {spinner}");
+
+    let rtt_spinner = ProgressBar::new_spinner();
+    rtt_spinner.set_style(spinner_style);
+    rtt_spinner.set_prefix("[3/3]");
+    rtt_spinner.set_message("Attaching RTT");
 
     let mut rtt;
     'rtt: loop {
@@ -175,18 +182,19 @@ fn run(session: Arc<Mutex<Session>>, opts: &Opts) -> Result<()> {
                     rtt = r;
                     break 'rtt;
                 }
-                Err(probe_rs_rtt::Error::ControlBlockNotFound) => {
-                    eprint!(".");
-                    std::thread::sleep(Duration::from_millis(100));
-                }
+                Err(probe_rs_rtt::Error::ControlBlockNotFound) => {}
                 Err(err) => {
                     eprintln!("Error attaching to RTT: {}", err);
+                    std::thread::sleep(Duration::from_millis(300));
                 }
+            }
+            if opts.verbose {
+                rtt_spinner.tick();
             }
         }
     }
 
-    println!("Attached to RTT");
+    rtt_spinner.finish_with_message("Attached to RTT");
 
     // TODO: reset halt chip on exit
     let up_channel = rtt.up_channels().take(0);
