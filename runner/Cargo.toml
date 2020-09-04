@@ -5,8 +5,8 @@ authors = ["Eike Siewertsen <eike@allv.is>"]
 edition = "2018"
 
 [dependencies]
-probe-rs = { version = "0.6.2", git = "https://github.com/probe-rs/probe-rs", branch = "serial-id" }
-probe-rs-rtt = { git = "https://github.com/fry/probe-rs-rtt", branch = "api-changes" }
+probe-rs = "0.9.0"
+probe-rs-rtt = "0.4.0"
 env_logger = "0.7.1"
 anyhow = "1.0.31"
 log = "0.4.8"

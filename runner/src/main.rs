@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use probe_rs::{
     config::{MemoryRange, MemoryRegion, TargetSelector},
     flashing::{download_file_with_options, DownloadOptions, Format},
@@ -8,7 +8,10 @@ use probe_rs_rtt::{Rtt, ScanRegion};
 use std::io::prelude::*;
 use std::io::stdout;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use structopt::StructOpt;
 
 #[derive(StructOpt, Clone)]
@@ -24,7 +27,14 @@ struct Opts {
     target: PathBuf,
 }
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(e) = try_main() {
+        eprintln!("Error: {:?}", e);
+        std::process::exit(1);
+    }
+}
+
+fn try_main() -> Result<()> {
     let opts = Opts::from_args();
 
     if let Some(level) = opts.logging {
@@ -34,7 +44,11 @@ fn main() -> Result<()> {
     }
 
     let list = Probe::list_all();
-    let device = list.first().unwrap();
+    let device = if let Some(d) = list.first() {
+        d
+    } else {
+        bail!("No debug probe connected!");
+    };
 
     let mut probe = device.open()?;
     probe.select_protocol(WireProtocol::Swd)?;
@@ -72,7 +86,13 @@ fn main() -> Result<()> {
         ctrlc::set_handler(move || {
             if !opts.no_halt_on_exit {
                 println!("halting chip");
-                session.lock().unwrap().core(0).unwrap().halt().unwrap();
+                session
+                    .lock()
+                    .unwrap()
+                    .core(0)
+                    .unwrap()
+                    .halt(Duration::from_secs(5))
+                    .unwrap();
             }
             std::process::exit(0);
         })
@@ -143,17 +163,21 @@ fn run(session: Arc<Mutex<Session>>, opts: &Opts) -> Result<()> {
         ram_ranges = get_ram_memory_ranges(&guard, &opts.target)?;
     }
 
+    if opts.verbose {
+        println!("attaching RTT");
+    }
+
     let mut rtt;
     'rtt: loop {
-        if opts.verbose {
-            println!("attaching RTT");
-        }
-
         for region in &ram_ranges {
             match Rtt::attach_region(session.clone(), &region) {
                 Ok(r) => {
                     rtt = r;
                     break 'rtt;
+                }
+                Err(probe_rs_rtt::Error::ControlBlockNotFound) => {
+                    eprint!(".");
+                    std::thread::sleep(Duration::from_millis(100));
                 }
                 Err(err) => {
                     eprintln!("Error attaching to RTT: {}", err);
